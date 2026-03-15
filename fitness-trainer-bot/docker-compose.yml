@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    command: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - ./api/.env
+    volumes:
+      - sqlite_data:/app/db
+    ports:
+      - "8000:8000"
+
+  bot:
+    build: .
+    command: ["python", "-m", "bot.main"]
+    env_file:
+      - ./bot/.env
+    environment:
+      - API_BASE_URL=http://api:8000
+    depends_on:
+      - api
+    volumes:
+      - sqlite_data:/app/db
+
+volumes:
+  sqlite_data:
+
