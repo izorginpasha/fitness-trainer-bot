@@ -1,1 +1,1 @@
-# Логика: подписки, платежи (PaymentService, SubscriptionService)
+# Сервисы: AI-тренер (fitness_ai)

@@ -61,6 +61,19 @@ def init_db() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL,
+                tariff_code TEXT NOT NULL,
+                questions_limit INTEGER,
+                questions_used INTEGER NOT NULL DEFAULT 0,
+                expires_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
 
 
 def get_user_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
@@ -150,4 +163,91 @@ def get_payment_by_inv_id(inv_id: int) -> Optional[Dict[str, Any]]:
     with connect() as conn:
         row = conn.execute("SELECT * FROM payments WHERE inv_id = ?;", (inv_id,)).fetchone()
         return dict(row) if row is not None else None
+
+
+def get_active_subscription(telegram_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Возвращает активную подписку с доступными вопросами:
+    - unlimited: expires_at > now
+    - paid_10 / free_trial: questions_used < questions_limit, expires_at не истёк если есть
+    Приоритет: unlimited > paid_10 > free_trial.
+    """
+    import datetime
+    now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM user_subscriptions
+            WHERE telegram_id = ?
+              AND (expires_at IS NULL OR expires_at > ?)
+              AND (questions_limit IS NULL OR questions_used < questions_limit)
+            ORDER BY
+              CASE tariff_code
+                WHEN 'unlimited' THEN 1
+                WHEN 'paid_10' THEN 2
+                WHEN 'free_trial' THEN 3
+                ELSE 4
+              END,
+              created_at DESC
+            """,
+            (telegram_id, now),
+        ).fetchall()
+        return dict(rows[0]) if rows else None
+
+
+def create_free_trial_if_eligible(telegram_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Если пользователь зарегистрирован и у него ещё нет подписки free_trial (или она не исчерпана),
+    создаёт или возвращает free_trial. Иначе возвращает None.
+    """
+    user = get_user_by_telegram_id(telegram_id)
+    if not user:
+        return None
+    existing = get_active_subscription(telegram_id)
+    if existing:
+        return existing
+    with connect() as conn:
+        already_used = conn.execute(
+            "SELECT 1 FROM user_subscriptions WHERE telegram_id = ? AND tariff_code = 'free_trial';",
+            (telegram_id,),
+        ).fetchone()
+        if already_used:
+            return None
+        conn.execute(
+            """
+            INSERT INTO user_subscriptions (telegram_id, tariff_code, questions_limit, questions_used)
+            VALUES (?, 'free_trial', 2, 0);
+            """,
+            (telegram_id,),
+        )
+    return get_active_subscription(telegram_id)
+
+
+def increment_trainer_usage(telegram_id: int, subscription_id: int) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE user_subscriptions SET questions_used = questions_used + 1 WHERE id = ?;",
+            (subscription_id,),
+        )
+
+
+def add_subscription_after_payment(telegram_id: int, tariff_code: str) -> None:
+    """Добавляет подписку после успешной оплаты (paid_10 или unlimited)."""
+    import datetime
+    questions_limit = None
+    expires_at = None
+    if tariff_code == "paid_10":
+        questions_limit = 10
+    elif tariff_code == "unlimited":
+        expires_at = (datetime.datetime.utcnow() + datetime.timedelta(days=30)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_subscriptions (telegram_id, tariff_code, questions_limit, questions_used, expires_at)
+            VALUES (?, ?, ?, 0, ?);
+            """,
+            (telegram_id, tariff_code, questions_limit, expires_at),
+        )
 

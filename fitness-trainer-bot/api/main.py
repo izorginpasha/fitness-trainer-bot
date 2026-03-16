@@ -11,7 +11,13 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException
 from pydantic import BaseModel
 
-from db.session import init_db, create_payment, update_payment_status, get_payment_by_inv_id
+from db.session import (
+    init_db,
+    create_payment,
+    update_payment_status,
+    get_payment_by_inv_id,
+    add_subscription_after_payment,
+)
 
 # Загружаем .env: сначала api/.env, иначе корень проекта
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -125,6 +131,9 @@ def payment_result(
         raise HTTPException(status_code=404, detail="payment not found")
 
     update_payment_status(inv_id_int, "success")
+    tariff_code = payment.get("tariff_code") or ""
+    if tariff_code in ("paid_10", "unlimited"):
+        add_subscription_after_payment(int(payment["telegram_id"]), tariff_code)
     return f"OK{InvId}"
 
 

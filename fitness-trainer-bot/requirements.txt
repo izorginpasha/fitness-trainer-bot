@@ -1,0 +1,11 @@
+# Telegram-бот
+python-telegram-bot>=20.0
+python-dotenv>=1.0.0
+
+# HTTP-клиент (бот → API, запросы к AI)
+httpx>=0.25.0
+
+# API (Robokassa, платёжные эндпоинты)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
